@@ -3,45 +3,76 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>STOK GUDANG PEKANBARU</title>
+  <title>Dashboard Stok Gudang Pekanbaru</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background-color: #f5f5f5;
-      color: #333;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f7f7f7;
       margin: 0;
-      padding: 0;
+      color: #333;
     }
 
     header {
       background: linear-gradient(90deg, #d90429, #ffcc00);
       color: white;
-      text-align: center;
       padding: 20px;
+      text-align: center;
       font-size: 1.8em;
       font-weight: bold;
       letter-spacing: 1px;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.15);
     }
 
     .container {
-      max-width: 1200px;
+      max-width: 1300px;
       margin: 30px auto;
       background: white;
-      border-radius: 12px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+      padding: 25px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    input, select {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .btn {
+      background-color: #d90429;
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    .btn:hover {
+      background-color: #a10320;
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
+      margin-top: 20px;
+      font-size: 13px;
     }
 
     th, td {
       border: 1px solid #ddd;
       padding: 8px 10px;
       text-align: left;
-      font-size: 14px;
     }
 
     th {
@@ -49,72 +80,77 @@
       color: #222;
       position: sticky;
       top: 0;
+      z-index: 1;
     }
 
-    tr:nth-child(even) {
-      background-color: #f9f9f9;
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    tr:hover { background-color: #fff3cd; }
+
+    #loading {
+      text-align: center;
+      padding: 20px;
+      color: #777;
     }
 
-    tr:hover {
-      background-color: #ffeec2;
+    .chart-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
     }
 
-    .btn {
-      background: #d90429;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      padding: 10px 16px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: background 0.3s;
-    }
-
-    .btn:hover {
-      background: #a90322;
-    }
-
-    .refresh {
-      text-align: right;
-      margin-bottom: 10px;
+    canvas {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+      padding: 10px;
     }
 
     footer {
       text-align: center;
+      margin-top: 25px;
       font-size: 13px;
-      color: #666;
-      margin-top: 20px;
+      color: #777;
     }
 
-    #loading {
-      text-align: center;
-      color: #999;
-      padding: 20px;
-      font-size: 16px;
-    }
+    .low-stock { background-color: #ffcccc; }
+    .medium-stock { background-color: #fff3cd; }
+    .good-stock { background-color: #ccffcc; }
+
   </style>
 </head>
 <body>
-  <header>📦 STOK GUDANG PEKANBARU</header>
+  <header>📦 Dashboard Stok Gudang Pekanbaru</header>
 
   <div class="container">
-    <div class="refresh">
-      <button class="btn" onclick="loadData()">🔄 Refresh Data</button>
+    <div class="chart-container">
+      <canvas id="chartCategory"></canvas>
+      <canvas id="chartPack"></canvas>
     </div>
 
-    <div id="loading">Memuat data dari gudang...</div>
+    <div class="controls">
+      <input type="text" id="searchBox" placeholder="🔍 Cari SKU / Nama / Kategori" onkeyup="filterTable()">
+      <select id="filterCategory" onchange="filterTable()"><option value="">Filter Category</option></select>
+      <select id="filterPack" onchange="filterTable()"><option value="">Filter Pack</option></select>
+      <div>
+        <button class="btn" onclick="loadData()">🔄 Refresh</button>
+        <button class="btn" onclick="exportToCSV()">⬇️ Export CSV</button>
+      </div>
+    </div>
 
+    <div id="loading">Memuat data gudang...</div>
     <table id="dataTable" style="display:none;">
       <thead id="tableHead"></thead>
       <tbody id="tableBody"></tbody>
     </table>
   </div>
 
-  <footer>Data terhubung langsung dari Google Sheet | © 2025 Gudang Pekanbaru</footer>
+  <footer>© 2025 Gudang Pekanbaru | Terhubung langsung dari Google Sheet</footer>
 
   <script>
-    // GANTI INI DENGAN LINK APP SCRIPT KAMU
     const SHEET_URL = "https://script.google.com/macros/s/AKfycbwn_btVvmiFA38UKDVSO7WWlXjjzay73_36CgglIye7FtDvgtkHqoUV8ycgjoqJmGowDg/exec";
+
+    let allData = [];
+    let chartCategory, chartPack;
 
     async function loadData() {
       const loading = document.getElementById("loading");
@@ -124,42 +160,154 @@
 
       loading.style.display = "block";
       table.style.display = "none";
-      body.innerHTML = "";
       head.innerHTML = "";
+      body.innerHTML = "";
 
       try {
-        const response = await fetch(SHEET_URL + "?t=" + Date.now());
-        const data = await response.json();
-
+        const res = await fetch(SHEET_URL + "?t=" + Date.now());
+        const data = await res.json();
         if (!Array.isArray(data) || data.length === 0) {
           loading.textContent = "❌ Tidak ada data ditemukan.";
           return;
         }
 
+        allData = data;
         const headers = Object.keys(data[0]);
         head.innerHTML = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
 
-        data.forEach(row => {
-          const tr = document.createElement("tr");
-          headers.forEach(h => {
-            const td = document.createElement("td");
-            td.textContent = row[h] ?? "";
-            tr.appendChild(td);
-          });
-          body.appendChild(tr);
-        });
+        fillTable(data, headers);
+        fillDropdowns(data);
+        drawCharts(data);
 
         table.style.display = "table";
         loading.style.display = "none";
-
       } catch (e) {
-        loading.textContent = "⚠️ Gagal memuat data. Periksa koneksi atau URL Apps Script.";
         console.error(e);
+        loading.textContent = "⚠️ Gagal memuat data. Periksa koneksi atau URL Apps Script.";
       }
     }
 
+    function fillTable(data, headers) {
+      const body = document.getElementById("tableBody");
+      body.innerHTML = "";
+
+      data.forEach(row => {
+        const tr = document.createElement("tr");
+        const balance = parseFloat(row["Balance"]) || 0;
+
+        if (balance <= 5) tr.classList.add("low-stock");
+        else if (balance <= 20) tr.classList.add("medium-stock");
+        else tr.classList.add("good-stock");
+
+        headers.forEach(h => {
+          const td = document.createElement("td");
+          td.textContent = row[h] ?? "";
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    }
+
+    function fillDropdowns(data) {
+      const catSelect = document.getElementById("filterCategory");
+      const packSelect = document.getElementById("filterPack");
+
+      const categories = [...new Set(data.map(r => r["CATEGORY"]).filter(Boolean))].sort();
+      const packs = [...new Set(data.map(r => r["PACK"]).filter(Boolean))].sort();
+
+      catSelect.innerHTML = '<option value="">Filter Category</option>' +
+        categories.map(c => `<option value="${c}">${c}</option>`).join("");
+      packSelect.innerHTML = '<option value="">Filter Pack</option>' +
+        packs.map(p => `<option value="${p}">${p}</option>`).join("");
+    }
+
+    function filterTable() {
+      const search = document.getElementById("searchBox").value.toLowerCase();
+      const category = document.getElementById("filterCategory").value;
+      const pack = document.getElementById("filterPack").value;
+      const headers = Object.keys(allData[0]);
+
+      let filtered = allData.filter(row => {
+        const matchSearch = headers.some(h => String(row[h] ?? "").toLowerCase().includes(search));
+        const matchCat = category ? row["CATEGORY"] === category : true;
+        const matchPack = pack ? row["PACK"] === pack : true;
+        return matchSearch && matchCat && matchPack;
+      });
+
+      fillTable(filtered, headers);
+      drawCharts(filtered);
+    }
+
+    function exportToCSV() {
+      if (allData.length === 0) return alert("Data belum dimuat.");
+      const headers = Object.keys(allData[0]);
+      const rows = [headers.join(",")];
+      allData.forEach(obj => {
+        const row = headers.map(h => `"${String(obj[h] ?? "").replace(/"/g, '""')}"`).join(",");
+        rows.push(row);
+      });
+
+      const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "stok_gudang_pekanbaru.csv";
+      link.click();
+    }
+
+    function drawCharts(data) {
+      const ctx1 = document.getElementById("chartCategory");
+      const ctx2 = document.getElementById("chartPack");
+
+      const groupedCat = {};
+      const groupedPack = {};
+
+      data.forEach(item => {
+        const cat = item["CATEGORY"] || "Tidak Ada";
+        const pack = item["PACK"] || "Tidak Ada";
+        const val = parseFloat(item["Balance"]) || 0;
+        groupedCat[cat] = (groupedCat[cat] || 0) + val;
+        groupedPack[pack] = (groupedPack[pack] || 0) + val;
+      });
+
+      const labelsCat = Object.keys(groupedCat);
+      const valuesCat = Object.values(groupedCat);
+      const labelsPack = Object.keys(groupedPack);
+      const valuesPack = Object.values(groupedPack);
+
+      if (chartCategory) chartCategory.destroy();
+      if (chartPack) chartPack.destroy();
+
+      chartCategory = new Chart(ctx1, {
+        type: "bar",
+        data: {
+          labels: labelsCat,
+          datasets: [{
+            label: "Total Stok per Category",
+            data: valuesCat,
+            backgroundColor: ["#ffcc00", "#d90429", "#ff5733", "#ffc300"],
+            borderWidth: 1
+          }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+      });
+
+      chartPack = new Chart(ctx2, {
+        type: "pie",
+        data: {
+          labels: labelsPack,
+          datasets: [{
+            label: "Total Stok per Pack",
+            data: valuesPack,
+            backgroundColor: ["#ffcc00", "#ff5733", "#c70039", "#900c3f", "#581845"],
+            borderWidth: 1
+          }]
+        },
+        options: { responsive: true }
+      });
+    }
+
     loadData();
-    setInterval(loadData, 60000); // auto-refresh setiap 1 menit
+    setInterval(loadData, 60000);
   </script>
 </body>
 </html>
