@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>STOK GUDANG PEKANBARU</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#94a3b8;--accent:#06b6d4;--glass:rgba(255,255,255,0.03)}
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
+    body{background:linear-gradient(180deg,#071024 0%,#07142a 60%);color:#e6eef6;padding:28px}
+    .container{max-width:1100px;margin:0 auto}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+    h1{margin:0;font-size:20px;letter-spacing:0.6px}
+    .subtitle{color:var(--muted);font-size:13px}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--glass);border:1px solid rgba(255,255,255,0.03);padding:8px 12px;border-radius:10px;color:#dff6fb;cursor:pointer}
+    .btn.primary{background:linear-gradient(90deg,#06b6d4,#0ea5a7);color:#042025;border:none}
+    .search{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#e6eef6}
+    main{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:14px;padding:16px;border:1px solid rgba(255,255,255,0.03)}
+    table{width:100%;border-collapse:collapse;color:#e6eef6}
+    thead th{position:sticky;top:0;background:rgba(7,18,36,0.6);backdrop-filter:blur(6px);padding:10px;text-align:left;font-size:13px}
+    tbody td{padding:10px;border-top:1px solid rgba(255,255,255,0.02);font-size:14px}
+    th.sortable{cursor:pointer}
+    .small{font-size:12px;color:var(--muted)}
+    .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:12px;border:1px solid rgba(255,255,255,0.03)}
+    .tag{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03)}
+    footer{margin-top:12px;color:var(--muted);font-size:13px}
+    @media (max-width:700px){header{flex-direction:column;align-items:flex-start;gap:8px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>STOK GUDANG PEKANBARU</h1>
+        <div class="subtitle">Sumber: Google Sheets — sheet: <strong>XLS SC - Balance</strong></div>
+      </div>
+      <div class="controls">
+        <input id="q" class="search" placeholder="Cari SKU atau Nama Barang..." />
+        <button id="toggleView" class="btn">Tampilkan Kartu</button>
+        <button id="refresh" class="btn">Refresh</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="tableWrap">
+        <table id="stokTable">
+          <thead>
+            <tr>
+              <th class="sortable" data-key="Nomor">No</th>
+              <th class="sortable" data-key="SKU">SKU</th>
+              <th class="sortable" data-key="Product Code">Nama Barang</th>
+              <th class="sortable" data-key="Category">Category</th>
+              <th class="sortable" data-key="Pack">Pack</th>
+              <th class="sortable" data-key="Balance">Balance</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div id="cardsWrap" style="display:none;margin-top:6px">
+        <div id="cards" class="cards"></div>
+      </div>
+
+      <footer id="status">Memuat data...</footer>
+    </main>
+  </div>
+
+  <script>
+    // --- CONFIG ---
+    const SPREADSHEET_ID = '11qMnSGSs1SgiqsWsBtx62aNE8sx_98ZSOmR3t1lztn0'; // dari kamu
+    const SHEET_NAME = 'XLS SC - Balance';
+    const AUTO_REFRESH_MS = 60000; // 60s
+
+    // --- parsing Google Sheets "gviz" JSON ---
+    function gvizToJson(text){
+      // response starts with: "/*O_o*/\ngoogle.visualization.Query.setResponse(...)"
+      const jsonText = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/s);
+      if(!jsonText) throw new Error('Format gviz tidak terduga');
+      return JSON.parse(jsonText[1]);
+    }
+
+    function mapRowToObject(cols, row){
+      const obj = {};
+      cols.forEach((c,i)=>{
+        const label = c.label || c.id || `col_${i}`;
+        const cell = row.c && row.c[i] ? row.c[i].v : '';
+        obj[label.trim()] = cell;
+      });
+      return obj;
+    }
+
+    async function fetchSheet(){
+      const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}`;
+      const resp = await fetch(url);
+      const txt = await resp.text();
+      const json = gvizToJson(txt);
+      const cols = json.table.cols;
+      const rows = json.table.rows || [];
+      return rows.map(r=>mapRowToObject(cols,r));
+    }
+
+    // --- rendering ---
+    let DATA = [];
+    let sortKey = null;
+    let sortDir = 1; // 1 ascending, -1 descending
+
+    function normalize(str){ return (''+ (str===null||str===undefined ? '' : str)).toLowerCase(); }
+
+    function renderTable(data){
+      const tbody = document.querySelector('#stokTable tbody');
+      tbody.innerHTML = '';
+      data.forEach(item=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="small">${item['Nomor']||''}</td>
+          <td><strong>${item['SKU']||''}</strong></td>
+          <td>${item['Product Code']||''}</td>
+          <td class="small">${item['Category']||''}</td>
+          <td class="small">${item['Pack']||''}</td>
+          <td><strong>${item['Balance']||''}</strong></td>
+          <td class="small">${item['Remarks']||''}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderCards(data){
+      const wrap = document.getElementById('cards');
+      wrap.innerHTML = '';
+      data.forEach(item=>{
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div class="small">SKU</div>
+              <div><strong>${item['SKU']||''}</strong></div>
+            </div>
+            <div style="text-align:right">
+              <div class="small">STOK AKHIR</div>
+              <div style="font-size:18px"><strong>${item['Balance']||''}</strong></div>
+            </div>
+          </div>
+          <div style="margin-bottom:8px"><strong>${item['Product Code']||''}</strong></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+            <span class="tag">${item['Category']||''}</span>
+            <span class="tag">${item['Pack']||''}</span>
+          </div>
+          <div class="small">Remarks: ${item['Remarks']||''}</div>
+        `;
+        wrap.appendChild(div);
+      });
+    }
+
+    function applyFilters(){
+      const q = normalize(document.getElementById('q').value);
+      let filtered = DATA.filter(item=>{
+        return normalize(item['SKU']).includes(q) || normalize(item['Product Code']).includes(q) || normalize(item['Category']).includes(q);
+      });
+      if(sortKey){
+        filtered.sort((a,b)=>{
+          const A = (''+ (a[sortKey]||'')).toLowerCase();
+          const B = (''+ (b[sortKey]||'')).toLowerCase();
+          if(!isNaN(parseFloat(A)) && !isNaN(parseFloat(B))){
+            return (parseFloat(A)-parseFloat(B)) * sortDir;
+          }
+          return A.localeCompare(B) * sortDir;
+        });
+      }
+      renderTable(filtered);
+      renderCards(filtered);
+      document.getElementById('status').textContent = `Menampilkan ${filtered.length} item • Terakhir sinkron: ${new Date().toLocaleString()}`;
+    }
+
+    // --- UI wiring ---
+    document.getElementById('q').addEventListener('input', applyFilters);
+    document.getElementById('toggleView').addEventListener('click', ()=>{
+      const tv = document.getElementById('tableWrap');
+      const cv = document.getElementById('cardsWrap');
+      if(tv.style.display === 'none'){
+        tv.style.display='block'; cv.style.display='none'; document.getElementById('toggleView').textContent='Tampilkan Kartu';
+      } else { tv.style.display='none'; cv.style.display='block'; document.getElementById('toggleView').textContent='Tampilkan Tabel'; }
+    });
+    document.getElementById('refresh').addEventListener('click', loadAndRender);
+
+    document.querySelectorAll('th.sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const key = th.getAttribute('data-key');
+        if(sortKey === key) sortDir = -sortDir; else { sortKey = key; sortDir = 1; }
+        applyFilters();
+      });
+    });
+
+    // --- main loader ---
+    async function loadAndRender(){
+      try{
+        document.getElementById('status').textContent = 'Memuat data...';
+        const rows = await fetchSheet();
+        // Map column labels to expected labels (be tolerant)
+        DATA = rows.map(r=>{
+          return {
+            'Nomor': r['Nomor'] || r['No'] || r['no'] || r['nomor'] || '',
+            'SKU': r['SKU'] || r['Nomor Material'] || r['Nomor_Material'] || r['Material'] || '',
+            'Product Code': r['Product Code'] || r['Product_Code'] || r['Nama Barang'] || r['Product'] || r['ProductName'] || '',
+            'Category': r['Category'] || r['CATEGORY'] || r['Kategori'] || r['Category'] || '',
+            'Pack': r['Pack'] || r['PACK'] || r['Jenis PACK'] || r['PackType'] || '',
+            'Initial Stock': r['Initial Stock'] || r['Initial_Stock'] || r['Initial'] || '',
+            'Accumulative IN': r['Accumulative IN'] || r['Accumulative_IN'] || r['In'] || r['Masuk'] || '',
+            'Accumulative OUT': r['Accumulative OUT'] || r['Accumulative_OUT'] || r['Out'] || r['Keluar'] || '',
+            'Adjustment': r['Adjustment'] || r['Adj'] || r['Adjustment'] || '',
+            'Balance': r['Balance'] || r['Saldo Akhir'] || r['Balance'] || r['Stok Akhir'] || '',
+            'Remarks': r['Remarks'] || r['Keterangan'] || r['Notes'] || ''
+          };
+        });
+        applyFilters();
+      }catch(err){
+        console.error(err);
+        document.getElementById('status').textContent = 'Gagal memuat data — pastikan sheet dapat diakses publik dan nama sheet benar.';
+      }
+    }
+
+    // initial load & auto-refresh
+    loadAndRender();
+    setInterval(loadAndRender, AUTO_REFRESH_MS);
+  </script>
+</body>
+</html>
